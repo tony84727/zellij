@@ -7,15 +7,13 @@ use crate::{
     input::{actions::Action, layout::Layout, options::Options, plugins::PluginsConfig},
     pane_size::{Size, SizeInPixels},
 };
-use interprocess::local_socket::LocalSocketStream;
+use interprocess::local_socket::{LocalSocketStream, ReadHalf, WriteHalf};
 use log::warn;
-use nix::unistd::dup;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Display, Error, Formatter},
     io::{self, Write},
     marker::PhantomData,
-    os::unix::io::{AsRawFd, FromRawFd},
 };
 
 type SessionId = u64;
@@ -159,15 +157,15 @@ There are a few things you can try now:
 
 /// Sends messages on a stream socket, along with an [`ErrorContext`].
 pub struct IpcSenderWithContext<T: Serialize> {
-    sender: io::BufWriter<LocalSocketStream>,
+    sender: io::BufWriter<WriteHalf>,
     _phantom: PhantomData<T>,
 }
 
 impl<T: Serialize> IpcSenderWithContext<T> {
     /// Returns a sender to the given [LocalSocketStream](interprocess::local_socket::LocalSocketStream).
-    pub fn new(sender: LocalSocketStream) -> Self {
+    pub fn new(write: WriteHalf) -> Self {
         Self {
-            sender: io::BufWriter::new(sender),
+            sender: io::BufWriter::new(write),
             _phantom: PhantomData,
         }
     }
@@ -184,22 +182,24 @@ impl<T: Serialize> IpcSenderWithContext<T> {
             Ok(())
         }
     }
+}
 
-    /// Returns an [`IpcReceiverWithContext`] with the same socket as this sender.
-    pub fn get_receiver<F>(&self) -> IpcReceiverWithContext<F>
-    where
-        F: for<'de> Deserialize<'de> + Serialize,
-    {
-        let sock_fd = self.sender.get_ref().as_raw_fd();
-        let dup_sock = dup(sock_fd).unwrap();
-        let socket = unsafe { LocalSocketStream::from_raw_fd(dup_sock) };
-        IpcReceiverWithContext::new(socket)
+impl<T: Serialize> From<LocalSocketStream> for IpcSenderWithContext<T> {
+    fn from(value: LocalSocketStream) -> Self {
+        let (_, sender) = value.split();
+        Self::new(sender)
+    }
+}
+
+impl<T: Serialize> From<WriteHalf> for IpcSenderWithContext<T> {
+    fn from(value: WriteHalf) -> Self {
+        Self::new(value)
     }
 }
 
 /// Receives messages on a stream socket, along with an [`ErrorContext`].
 pub struct IpcReceiverWithContext<T> {
-    receiver: io::BufReader<LocalSocketStream>,
+    receiver: io::BufReader<ReadHalf>,
     _phantom: PhantomData<T>,
 }
 
@@ -208,7 +208,7 @@ where
     T: for<'de> Deserialize<'de> + Serialize,
 {
     /// Returns a receiver to the given [LocalSocketStream](interprocess::local_socket::LocalSocketStream).
-    pub fn new(receiver: LocalSocketStream) -> Self {
+    pub fn new(receiver: ReadHalf) -> Self {
         Self {
             receiver: io::BufReader::new(receiver),
             _phantom: PhantomData,
@@ -225,12 +225,13 @@ where
             },
         }
     }
+}
 
-    /// Returns an [`IpcSenderWithContext`] with the same socket as this receiver.
-    pub fn get_sender<F: Serialize>(&self) -> IpcSenderWithContext<F> {
-        let sock_fd = self.receiver.get_ref().as_raw_fd();
-        let dup_sock = dup(sock_fd).unwrap();
-        let socket = unsafe { LocalSocketStream::from_raw_fd(dup_sock) };
-        IpcSenderWithContext::new(socket)
+impl<T> From<ReadHalf> for IpcReceiverWithContext<T>
+where
+    T: for<'de> Deserialize<'de> + Serialize,
+{
+    fn from(value: ReadHalf) -> Self {
+        Self::new(value)
     }
 }

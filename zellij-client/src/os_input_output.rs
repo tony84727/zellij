@@ -243,8 +243,9 @@ impl ClientOsApi for ClientOsInputOutput {
                 },
             }
         }
-        let sender = IpcSenderWithContext::new(socket);
-        let receiver = sender.get_receiver();
+        let (receiver, sender) = socket.split();
+        let sender = IpcSenderWithContext::new(sender);
+        let receiver = IpcReceiverWithContext::new(receiver);
         *self.send_instructions_to_server.lock().unwrap() = Some(sender);
         *self.receive_instructions_from_server.lock().unwrap() = Some(receiver);
     }

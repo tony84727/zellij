@@ -710,8 +710,9 @@ impl ServerOsApi for ServerOsInputOutput {
         client_id: ClientId,
         stream: LocalSocketStream,
     ) -> Result<IpcReceiverWithContext<ClientToServerMsg>> {
-        let receiver = IpcReceiverWithContext::new(stream);
-        let sender = ClientSender::new(client_id, receiver.get_sender());
+        let (receiver, sender) = stream.split();
+        let receiver = IpcReceiverWithContext::new(receiver);
+        let sender = ClientSender::new(client_id, IpcSenderWithContext::new(sender));
         self.client_senders
             .lock()
             .to_anyhow()

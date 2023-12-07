@@ -301,6 +301,7 @@ pub enum ScreenInstruction {
     FocusPaneWithId(PaneId, bool, ClientId),                             // bool is should_float
     RenamePane(PaneId, Vec<u8>),
     RenameTab(usize, Vec<u8>),
+    MoveTab(usize, i64),
     RequestPluginPermissions(
         u32, // u32 - plugin_id
         PluginPermission,
@@ -490,6 +491,7 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::FocusPaneWithId(..) => ScreenContext::FocusPaneWithId,
             ScreenInstruction::RenamePane(..) => ScreenContext::RenamePane,
             ScreenInstruction::RenameTab(..) => ScreenContext::RenameTab,
+            ScreenInstruction::MoveTab(..) => ScreenContext::MoveTab,
             ScreenInstruction::RequestPluginPermissions(..) => {
                 ScreenContext::RequestPluginPermissions
             },
@@ -3562,6 +3564,9 @@ pub(crate) fn screen_thread_main(
                     },
                 }
                 screen.log_and_report_session_state()?;
+            },
+            ScreenInstruction::MoveTab(index, offset) => {
+                todo!()
             },
             ScreenInstruction::RequestPluginPermissions(plugin_id, plugin_permission) => {
                 let all_tabs = screen.get_tabs_mut();

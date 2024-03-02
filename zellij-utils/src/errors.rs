@@ -291,6 +291,8 @@ pub enum ScreenContext {
     GoToTabName,
     UpdateTabName,
     UndoRenameTab,
+    MoveTabLeft,
+    MoveTabRight,
     TerminalResize,
     TerminalPixelDimensions,
     TerminalBackgroundColor,
@@ -442,6 +444,7 @@ pub enum ServerContext {
     UnblockCliPipeInput,
     CliPipeOutput,
     AssociatePipeWithClient,
+    DisconnectAllClientsExcept,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

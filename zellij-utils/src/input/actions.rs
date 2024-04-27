@@ -284,6 +284,19 @@ pub enum Action {
         cwd: Option<PathBuf>,
         pane_title: Option<String>,
     },
+    KeybindPipe {
+        name: Option<String>,
+        payload: Option<String>,
+        args: Option<BTreeMap<String, String>>,
+        plugin: Option<String>,
+        configuration: Option<BTreeMap<String, String>>,
+        launch_new: bool,
+        skip_cache: bool,
+        floating: Option<bool>,
+        in_place: Option<bool>,
+        cwd: Option<PathBuf>,
+        pane_title: Option<String>,
+    },
 }
 
 impl Action {
@@ -312,6 +325,7 @@ impl Action {
             CliAction::MoveFocusOrTab { direction } => Ok(vec![Action::MoveFocusOrTab(direction)]),
             CliAction::MovePane { direction } => Ok(vec![Action::MovePane(direction)]),
             CliAction::MovePaneBackwards => Ok(vec![Action::MovePaneBackwards]),
+            CliAction::MoveTab { direction } => Ok(vec![Action::MoveTab(direction)]),
             CliAction::Clear => Ok(vec![Action::ClearScreen]),
             CliAction::DumpScreen { path, full } => Ok(vec![Action::DumpScreen(
                 path.as_os_str().to_string_lossy().into(),
@@ -353,7 +367,7 @@ impl Action {
                 let alias_cwd = cwd.clone().map(|cwd| current_dir.join(cwd));
                 let cwd = cwd
                     .map(|cwd| current_dir.join(cwd))
-                    .or_else(|| Some(current_dir));
+                    .or_else(|| Some(current_dir.clone()));
                 if let Some(plugin) = plugin {
                     let plugin = match RunPluginLocation::parse(&plugin, cwd.clone()) {
                         Ok(location) => {
@@ -365,11 +379,15 @@ impl Action {
                                 initial_cwd: cwd.clone(),
                             })
                         },
-                        Err(_) => RunPluginOrAlias::Alias(PluginAlias::new(
-                            &plugin,
-                            &configuration.map(|c| c.inner().clone()),
-                            alias_cwd,
-                        )),
+                        Err(_) => {
+                            let mut plugin_alias = PluginAlias::new(
+                                &plugin,
+                                &configuration.map(|c| c.inner().clone()),
+                                alias_cwd,
+                            );
+                            plugin_alias.set_caller_cwd_if_not_set(Some(current_dir));
+                            RunPluginOrAlias::Alias(plugin_alias)
+                        },
                     };
                     if floating {
                         Ok(vec![Action::NewFloatingPluginPane(

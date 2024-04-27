@@ -67,6 +67,7 @@ impl ZellijPlugin for State {
             EventType::FileSystemUpdate,
             EventType::FileSystemDelete,
         ]);
+        watch_filesystem();
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -338,6 +339,7 @@ impl ZellijPlugin for State {
         let input_pipe_id = match pipe_message.source {
             PipeSource::Cli(id) => id.clone(),
             PipeSource::Plugin(id) => format!("{}", id),
+            PipeSource::Keybind => format!("keybind"),
         };
         let name = pipe_message.name;
         let payload = pipe_message.payload;

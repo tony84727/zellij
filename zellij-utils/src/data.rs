@@ -5,6 +5,7 @@ use clap::ArgEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
+use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
@@ -61,6 +62,8 @@ pub enum Key {
     BackTab,
     Null,
     Esc,
+    AltF(u8),
+    CtrlF(u8),
 }
 
 impl FromStr for Key {
@@ -76,15 +79,11 @@ impl FromStr for Key {
             }
         }
         match (modifier, main_key) {
+            (Some("Ctrl"), Some(main_key)) if main_key == "@" || main_key == "Space" => {
+                Ok(Key::Char('\x00'))
+            },
             (Some("Ctrl"), Some(main_key)) => {
-                let mut key_chars = main_key.chars();
-                let key_count = main_key.chars().count();
-                if key_count == 1 {
-                    let key_char = key_chars.next().unwrap();
-                    Ok(Key::Ctrl(key_char))
-                } else {
-                    Err(format!("Failed to parse key: {}", key_str).into())
-                }
+                parse_main_key(main_key, key_str, Key::Ctrl, Key::CtrlF)
             },
             (Some("Alt"), Some(main_key)) => {
                 match main_key {
@@ -95,16 +94,12 @@ impl FromStr for Key {
                     "Right" => Ok(Key::Alt(CharOrArrow::Direction(Direction::Right))),
                     "Up" => Ok(Key::Alt(CharOrArrow::Direction(Direction::Up))),
                     "Down" => Ok(Key::Alt(CharOrArrow::Direction(Direction::Down))),
-                    _ => {
-                        let mut key_chars = main_key.chars();
-                        let key_count = main_key.chars().count();
-                        if key_count == 1 {
-                            let key_char = key_chars.next().unwrap();
-                            Ok(Key::Alt(CharOrArrow::Char(key_char)))
-                        } else {
-                            Err(format!("Failed to parse key: {}", key_str).into())
-                        }
-                    },
+                    _ => parse_main_key(
+                        main_key,
+                        key_str,
+                        |c| Key::Alt(CharOrArrow::Char(c)),
+                        Key::AltF,
+                    ),
                 }
             },
             (None, Some(main_key)) => match main_key {
@@ -123,32 +118,39 @@ impl FromStr for Key {
                 "Space" => Ok(Key::Char(' ')),
                 "Enter" => Ok(Key::Char('\n')),
                 "Esc" => Ok(Key::Esc),
-                _ => {
-                    let mut key_chars = main_key.chars();
-                    let key_count = main_key.chars().count();
-                    if key_count == 1 {
-                        let key_char = key_chars.next().unwrap();
-                        Ok(Key::Char(key_char))
-                    } else if key_count > 1 {
-                        if let Some(first_char) = key_chars.next() {
-                            if first_char == 'F' {
-                                let f_index: String = key_chars.collect();
-                                let f_index: u8 = f_index
-                                    .parse()
-                                    .map_err(|e| format!("Failed to parse F index: {}", e))?;
-                                if f_index >= 1 && f_index <= 12 {
-                                    return Ok(Key::F(f_index));
-                                }
-                            }
-                        }
-                        Err(format!("Failed to parse key: {}", key_str).into())
-                    } else {
-                        Err(format!("Failed to parse key: {}", key_str).into())
-                    }
-                },
+                _ => parse_main_key(main_key, key_str, Key::Char, Key::F),
             },
             _ => Err(format!("Failed to parse key: {}", key_str).into()),
         }
+    }
+}
+
+fn parse_main_key(
+    main_key: &str,
+    key_str: &str,
+    to_char_key: impl FnOnce(char) -> Key,
+    to_fn_key: impl FnOnce(u8) -> Key,
+) -> Result<Key, Box<dyn std::error::Error>> {
+    let mut key_chars = main_key.chars();
+    let key_count = main_key.chars().count();
+    if key_count == 1 {
+        let key_char = key_chars.next().unwrap();
+        Ok(to_char_key(key_char))
+    } else if key_count > 1 {
+        if let Some(first_char) = key_chars.next() {
+            if first_char == 'F' {
+                let f_index: String = key_chars.collect();
+                let f_index: u8 = f_index
+                    .parse()
+                    .map_err(|e| format!("Failed to parse F index: {}", e))?;
+                if f_index >= 1 && f_index <= 12 {
+                    return Ok(to_fn_key(f_index));
+                }
+            }
+        }
+        Err(format!("Failed to parse key: {}", key_str).into())
+    } else {
+        Err(format!("Failed to parse key: {}", key_str).into())
     }
 }
 
@@ -172,10 +174,13 @@ impl fmt::Display for Key {
                 '\n' => write!(f, "ENTER"),
                 '\t' => write!(f, "TAB"),
                 ' ' => write!(f, "SPACE"),
+                '\x00' => write!(f, "Ctrl+SPACE"),
                 _ => write!(f, "{}", c),
             },
             Key::Alt(c) => write!(f, "Alt+{}", c),
             Key::Ctrl(c) => write!(f, "Ctrl+{}", Key::Char(*c)),
+            Key::AltF(n) => write!(f, "Alt+F{}", n),
+            Key::CtrlF(n) => write!(f, "Ctrl+F{}", n),
             Key::Null => write!(f, "NULL"),
             Key::Esc => write!(f, "ESC"),
         }
@@ -458,6 +463,25 @@ pub enum Mouse {
     Release(isize, usize),    // line and column
 }
 
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FileMetadata {
+    pub is_dir: bool,
+    pub is_file: bool,
+    pub is_symlink: bool,
+    pub len: u64,
+}
+
+impl From<Metadata> for FileMetadata {
+    fn from(metadata: Metadata) -> Self {
+        FileMetadata {
+            is_dir: metadata.is_dir(),
+            is_file: metadata.is_file(),
+            is_symlink: metadata.is_symlink(),
+            len: metadata.len(),
+        }
+    }
+}
+
 /// These events can be subscribed to with subscribe method exported by `zellij-tile`.
 /// Once subscribed to, they will trigger the `update` method of the `ZellijPlugin` trait.
 #[derive(Debug, Clone, PartialEq, EnumDiscriminants, ToString, Serialize, Deserialize)]
@@ -488,13 +512,13 @@ pub enum Event {
         String, // payload
     ),
     /// A file was created somewhere in the Zellij CWD folder
-    FileSystemCreate(Vec<PathBuf>),
+    FileSystemCreate(Vec<(PathBuf, Option<FileMetadata>)>),
     /// A file was accessed somewhere in the Zellij CWD folder
-    FileSystemRead(Vec<PathBuf>),
+    FileSystemRead(Vec<(PathBuf, Option<FileMetadata>)>),
     /// A file was modified somewhere in the Zellij CWD folder
-    FileSystemUpdate(Vec<PathBuf>),
+    FileSystemUpdate(Vec<(PathBuf, Option<FileMetadata>)>),
     /// A file was deleted somewhere in the Zellij CWD folder
-    FileSystemDelete(Vec<PathBuf>),
+    FileSystemDelete(Vec<(PathBuf, Option<FileMetadata>)>),
     /// A Result of plugin permission request
     PermissionRequestResult(PermissionStatus),
     SessionUpdate(
@@ -904,10 +928,11 @@ pub struct PaneInfo {
     pub is_selectable: bool,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct PluginIds {
     pub plugin_id: u32,
     pub zellij_pid: u32,
+    pub initial_cwd: PathBuf,
 }
 
 /// Tag used to identify the plugin in layout and config kdl files
@@ -1144,6 +1169,7 @@ pub enum HttpVerb {
 pub enum PipeSource {
     Cli(String), // String is the pipe_id of the CLI pipe (used for blocking/unblocking)
     Plugin(u32), // u32 is the lugin id
+    Keybind,     // TODO: consider including the actual keybind here?
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1350,4 +1376,9 @@ pub enum PluginCommand {
     MessageToPlugin(MessageToPlugin),
     DisconnectOtherClients,
     KillSessions(Vec<String>), // one or more session names
+    ScanHostFolder(PathBuf),   // TODO: rename to ScanHostFolder
+    WatchFilesystem,
+    DumpSessionLayout,
+    CloseSelf,
+    NewTabsWithLayoutInfo(LayoutInfo),
 }

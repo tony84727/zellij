@@ -5,12 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
+
+## [0.40.1] - 2024-05-02
 * fix(sessions): issue where sessions would occasionally become unresponsive (https://github.com/zellij-org/zellij/pull/3281)
 * fix(cli): respect all options (eg. `default-layout`) when creating a session in the background from the CLI (https://github.com/zellij-org/zellij/pull/3288)
 * fix(cli): rename tab and pane from cli (https://github.com/zellij-org/zellij/pull/3295)
 * fix(plugins): respect $SHELL when opening a terminal from plugins (eg. from the filepicker strider) (https://github.com/zellij-org/zellij/pull/3296)
 * fix(tabs): closing a tab no longer breaks tab movement (https://github.com/zellij-org/zellij/pull/3299)
 * feat(plugins): add API to open new tabs with a LayoutInfo (https://github.com/zellij-org/zellij/pull/3305)
+* feat(cli): add `zellij action list-clients` to allow listing the connected clients as well as their pane_id and running command (https://github.com/zellij-org/zellij/pull/3314)
+* feat(cli): allow binding Ctrl J (https://github.com/zellij-org/zellij/pull/3307)
 
 ## [0.40.0] - 2024-04-16
 * feat(plugins): skip plugin cache flag when loading plugins (https://github.com/zellij-org/zellij/pull/2971)

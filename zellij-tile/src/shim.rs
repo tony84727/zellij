@@ -76,24 +76,28 @@ pub fn get_zellij_version() -> String {
 // Host Functions
 
 /// Open a file in the user's default `$EDITOR` in a new pane
-pub fn open_file(file_to_open: FileToOpen) {
-    let plugin_command = PluginCommand::OpenFile(file_to_open);
+pub fn open_file(file_to_open: FileToOpen, context: BTreeMap<String, String>) {
+    let plugin_command = PluginCommand::OpenFile(file_to_open, context);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
 }
 
 /// Open a file in the user's default `$EDITOR` in a new floating pane
-pub fn open_file_floating(file_to_open: FileToOpen, coordinates: Option<FloatingPaneCoordinates>) {
-    let plugin_command = PluginCommand::OpenFileFloating(file_to_open, coordinates);
+pub fn open_file_floating(
+    file_to_open: FileToOpen,
+    coordinates: Option<FloatingPaneCoordinates>,
+    context: BTreeMap<String, String>,
+) {
+    let plugin_command = PluginCommand::OpenFileFloating(file_to_open, coordinates, context);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
 }
 
 /// Open a file in the user's default `$EDITOR`, replacing the focused pane
-pub fn open_file_in_place(file_to_open: FileToOpen) {
-    let plugin_command = PluginCommand::OpenFileInPlace(file_to_open);
+pub fn open_file_in_place(file_to_open: FileToOpen, context: BTreeMap<String, String>) {
+    let plugin_command = PluginCommand::OpenFileInPlace(file_to_open, context);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
@@ -131,8 +135,8 @@ pub fn open_terminal_in_place<P: AsRef<Path>>(path: P) {
 }
 
 /// Open a new command pane with the specified command and args (this sort of pane allows the user to control the command, re-run it and see its exit status through the Zellij UI).
-pub fn open_command_pane(command_to_run: CommandToRun) {
-    let plugin_command = PluginCommand::OpenCommandPane(command_to_run);
+pub fn open_command_pane(command_to_run: CommandToRun, context: BTreeMap<String, String>) {
+    let plugin_command = PluginCommand::OpenCommandPane(command_to_run, context);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
@@ -142,16 +146,29 @@ pub fn open_command_pane(command_to_run: CommandToRun) {
 pub fn open_command_pane_floating(
     command_to_run: CommandToRun,
     coordinates: Option<FloatingPaneCoordinates>,
+    context: BTreeMap<String, String>,
 ) {
-    let plugin_command = PluginCommand::OpenCommandPaneFloating(command_to_run, coordinates);
+    let plugin_command =
+        PluginCommand::OpenCommandPaneFloating(command_to_run, coordinates, context);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
 }
 
 /// Open a new in place command pane with the specified command and args (this sort of pane allows the user to control the command, re-run it and see its exit status through the Zellij UI).
-pub fn open_command_pane_in_place(command_to_run: CommandToRun) {
-    let plugin_command = PluginCommand::OpenCommandPaneInPlace(command_to_run);
+pub fn open_command_pane_in_place(command_to_run: CommandToRun, context: BTreeMap<String, String>) {
+    let plugin_command = PluginCommand::OpenCommandPaneInPlace(command_to_run, context);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+/// Open a new hidden (background) command pane with the specified command and args (this sort of pane allows the user to control the command, re-run it and see its exit status through the Zellij UI).
+pub fn open_command_pane_background(
+    command_to_run: CommandToRun,
+    context: BTreeMap<String, String>,
+) {
+    let plugin_command = PluginCommand::OpenCommandPaneBackground(command_to_run, context);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
@@ -241,9 +258,25 @@ pub fn hide_self() {
     unsafe { host_run_plugin_command() };
 }
 
+/// Hide the pane (suppress it) with the specified [PaneId] from the UI
+pub fn hide_pane_with_id(pane_id: PaneId) {
+    let plugin_command = PluginCommand::HidePaneWithId(pane_id);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
 /// Show the plugin pane (unsuppress it if it is suppressed), focus it and switch to its tab
 pub fn show_self(should_float_if_hidden: bool) {
     let plugin_command = PluginCommand::ShowSelf(should_float_if_hidden);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+/// Show the pane (unsuppress it if it is suppressed) with the specified [PaneId], focus it and switch to its tab
+pub fn show_pane_with_id(pane_id: PaneId, should_float_if_hidden: bool) {
+    let plugin_command = PluginCommand::ShowPaneWithId(pane_id, should_float_if_hidden);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
@@ -803,6 +836,22 @@ pub fn watch_filesystem() {
 /// Get the serialized session layout in KDL format as a CustomMessage Event
 pub fn dump_session_layout() {
     let plugin_command = PluginCommand::DumpSessionLayout;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+/// Rebind keys for the current user
+pub fn reconfigure(new_config: String, save_configuration_file: bool) {
+    let plugin_command = PluginCommand::Reconfigure(new_config, save_configuration_file);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+/// Re-run command in pane
+pub fn rerun_command_pane(terminal_pane_id: u32) {
+    let plugin_command = PluginCommand::RerunCommandPane(terminal_pane_id);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };

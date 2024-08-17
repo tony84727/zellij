@@ -98,6 +98,11 @@ enum CommandName {
   DumpSessionLayout = 84;
   CloseSelf = 85;
   NewTabsWithLayoutInfo = 86;
+  Reconfigure = 87;
+  HidePaneWithId = 88;
+  ShowPaneWithId = 89;
+  OpenCommandPaneBackground = 90;
+  RerunCommandPane = 91;
 }
 
 message PluginCommand {
@@ -155,7 +160,30 @@ message PluginCommand {
     KillSessionsPayload kill_sessions_payload = 60;
     string scan_host_folder_payload = 61;
     NewTabsWithLayoutInfoPayload new_tabs_with_layout_info_payload = 62;
+    ReconfigurePayload reconfigure_payload = 63;
+    HidePaneWithIdPayload hide_pane_with_id_payload = 64;
+    ShowPaneWithIdPayload show_pane_with_id_payload = 65;
+    OpenCommandPanePayload open_command_pane_background_payload = 66;
+    RerunCommandPanePayload rerun_command_pane_payload = 67;
   }
+}
+
+message ReconfigurePayload {
+  string config = 1;
+  bool write_to_disk = 2;
+}
+
+message RerunCommandPanePayload {
+  uint32 terminal_pane_id = 1;
+}
+
+message HidePaneWithIdPayload {
+  PaneId pane_id = 1;
+}
+
+message ShowPaneWithIdPayload {
+  PaneId pane_id = 1;
+  bool should_float_if_hidden = 2;
 }
 
 message NewTabsWithLayoutInfoPayload {
@@ -223,11 +251,13 @@ message UnsubscribePayload {
 message OpenFilePayload {
   file.File file_to_open = 1;
   optional FloatingPaneCoordinates floating_pane_coordinates = 2;
+  repeated ContextItem context = 3;
 }
 
 message OpenCommandPanePayload {
   command.Command command_to_run = 1;
   optional FloatingPaneCoordinates floating_pane_coordinates = 2;
+  repeated ContextItem context = 3;
 }
 
 message SwitchTabToPayload {

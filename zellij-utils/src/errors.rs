@@ -353,6 +353,8 @@ pub enum ScreenContext {
     RenameSession,
     DumpLayoutToPlugin,
     ListClientsMetadata,
+    Reconfigure,
+    RerunCommandPane,
 }
 
 /// Stack call representations corresponding to the different types of [`PtyInstruction`]s.
@@ -408,6 +410,8 @@ pub enum PluginContext {
     KeybindPipe,
     DumpLayoutToPlugin,
     ListClientsMetadata,
+    Reconfigure,
+    FailedToWriteConfigToDisk,
 }
 
 /// Stack call representations corresponding to the different types of [`ClientInstruction`]s.
@@ -431,6 +435,7 @@ pub enum ClientContext {
     UnblockCliPipeInput,
     CliPipeOutput,
     QueryTerminalSize,
+    WriteConfigToDisk,
 }
 
 /// Stack call representations corresponding to the different types of [`ServerInstruction`]s.
@@ -454,6 +459,11 @@ pub enum ServerContext {
     CliPipeOutput,
     AssociatePipeWithClient,
     DisconnectAllClientsExcept,
+    ChangeMode,
+    ChangeModeForAllClients,
+    Reconfigure,
+    ConfigWrittenToDisk,
+    FailedToWriteConfigToDisk,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

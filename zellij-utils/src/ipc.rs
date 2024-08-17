@@ -1,9 +1,9 @@
 //! IPC stuff for starting to split things into a client and server model.
 use crate::{
     cli::CliArgs,
-    data::{ClientId, ConnectToSession, InputMode, Style},
+    data::{ClientId, ConnectToSession, KeyWithModifier, Style},
     errors::{get_current_ctx, prelude::*, ErrorContext},
-    input::keybinds::Keybinds,
+    input::config::Config,
     input::{actions::Action, layout::Layout, options::Options, plugins::PluginAliases},
     pane_size::{Size, SizeInPixels},
 };
@@ -14,6 +14,7 @@ use std::{
     fmt::{Display, Error, Formatter},
     io::{self, Write},
     marker::PhantomData,
+    path::PathBuf,
 };
 
 type SessionId = u64;
@@ -39,7 +40,6 @@ pub enum ClientType {
 pub struct ClientAttributes {
     pub size: Size,
     pub style: Style,
-    pub keybinds: Keybinds,
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,21 +72,27 @@ pub enum ClientToServerMsg {
     NewClient(
         ClientAttributes,
         Box<CliArgs>,
-        Box<Options>,
+        Box<Config>,  // represents the saved configuration
+        Box<Options>, // represents the runtime configuration
         Box<Layout>,
         Box<PluginAliases>,
+        bool, // should launch setup wizard
     ),
     AttachClient(
         ClientAttributes,
-        Options,
+        Config,              // represents the saved configuration
+        Options,             // represents the runtime configuration
         Option<usize>,       // tab position to focus
         Option<(u32, bool)>, // (pane_id, is_plugin) => pane id to focus
     ),
     Action(Action, Option<u32>, Option<ClientId>), // u32 is the terminal id
+    Key(KeyWithModifier, Vec<u8>, bool),           // key, raw_bytes, is_kitty_keyboard_protocol
     ClientExited,
     KillSession,
     ConnStatus,
     ListClients,
+    ConfigWrittenToDisk(Config),
+    FailedToWriteConfigToDisk(Option<PathBuf>),
 }
 
 // Types of messages sent from the server to the client
@@ -95,7 +101,6 @@ pub enum ServerToClientMsg {
     Render(String),
     UnblockInputThread,
     Exit(ExitReason),
-    SwitchToMode(InputMode),
     Connected,
     ActiveClients(Vec<ClientId>),
     Log(Vec<String>),
@@ -104,6 +109,7 @@ pub enum ServerToClientMsg {
     UnblockCliPipeInput(String),   // String -> pipe name
     CliPipeOutput(String, String), // String -> pipe name, String -> Output
     QueryTerminalSize,
+    WriteConfigToDisk { config: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

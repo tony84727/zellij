@@ -9,10 +9,12 @@ use std::time::Duration;
 
 use log::{debug, warn};
 use zellij_utils::data::{
-    Direction, PaneManifest, PluginPermission, Resize, ResizeStrategy, SessionInfo,
+    Direction, KeyWithModifier, PaneManifest, PluginPermission, Resize, ResizeStrategy, SessionInfo,
 };
 use zellij_utils::errors::prelude::*;
 use zellij_utils::input::command::RunCommand;
+use zellij_utils::input::config::Config;
+use zellij_utils::input::keybinds::Keybinds;
 use zellij_utils::input::options::Clipboard;
 use zellij_utils::pane_size::{Size, SizeInPixels};
 use zellij_utils::{
@@ -151,6 +153,7 @@ pub enum ScreenInstruction {
         HoldForCommand,
         Option<Run>, // invoked with
         Option<FloatingPaneCoordinates>,
+        bool, // start suppressed
         ClientTabIndexOrPaneId,
     ),
     OpenInPlaceEditor(PaneId, ClientId),
@@ -158,7 +161,8 @@ pub enum ScreenInstruction {
     ToggleFloatingPanes(ClientId, Option<TerminalAction>),
     HorizontalSplit(PaneId, Option<InitialTitle>, HoldForCommand, ClientId),
     VerticalSplit(PaneId, Option<InitialTitle>, HoldForCommand, ClientId),
-    WriteCharacter(Vec<u8>, ClientId),
+    WriteCharacter(Option<KeyWithModifier>, Vec<u8>, bool, ClientId), // bool ->
+    // is_kitty_keyboard_protocol
     Resize(ClientId, ResizeStrategy),
     SwitchFocus(ClientId),
     FocusNextPane(ClientId),
@@ -310,6 +314,7 @@ pub enum ScreenInstruction {
         u32,            // plugin id
         Option<PaneId>,
         Option<PathBuf>, // cwd
+        bool,            // start suppressed
         Option<ClientId>,
     ),
     UpdatePluginLoadingStage(u32, LoadingIndication), // u32 - plugin_id
@@ -359,6 +364,12 @@ pub enum ScreenInstruction {
     DumpLayoutToHd,
     RenameSession(String, ClientId), // String -> new name
     ListClientsMetadata(Option<PathBuf>, ClientId), // Option<PathBuf> - default shell
+    Reconfigure {
+        client_id: ClientId,
+        keybinds: Option<Keybinds>,
+        default_mode: Option<InputMode>,
+    },
+    RerunCommandPane(u32), // u32 - terminal pane id
 }
 
 impl From<&ScreenInstruction> for ScreenContext {
@@ -543,6 +554,8 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::DumpLayoutToHd => ScreenContext::DumpLayoutToHd,
             ScreenInstruction::RenameSession(..) => ScreenContext::RenameSession,
             ScreenInstruction::ListClientsMetadata(..) => ScreenContext::ListClientsMetadata,
+            ScreenInstruction::Reconfigure { .. } => ScreenContext::Reconfigure,
+            ScreenInstruction::RerunCommandPane { .. } => ScreenContext::RerunCommandPane,
         }
     }
 }
@@ -621,6 +634,7 @@ pub(crate) struct Screen {
     arrow_fonts: bool,
     layout_dir: Option<PathBuf>,
     default_layout_name: Option<String>,
+    explicitly_disable_kitty_keyboard_protocol: bool,
 }
 
 impl Screen {
@@ -644,6 +658,7 @@ impl Screen {
         styled_underlines: bool,
         arrow_fonts: bool,
         layout_dir: Option<PathBuf>,
+        explicitly_disable_kitty_keyboard_protocol: bool,
     ) -> Self {
         let session_name = mode_info.session_name.clone().unwrap_or_default();
         let session_info = SessionInfo::new(session_name.clone());
@@ -684,6 +699,7 @@ impl Screen {
             arrow_fonts,
             resurrectable_sessions,
             layout_dir,
+            explicitly_disable_kitty_keyboard_protocol,
         }
     }
 
@@ -1034,15 +1050,19 @@ impl Screen {
     pub fn resize_to_screen(&mut self, new_screen_size: Size) -> Result<()> {
         let err_context = || format!("failed to resize to screen size: {new_screen_size:#?}");
 
-        self.size = new_screen_size;
-        for tab in self.tabs.values_mut() {
-            tab.resize_whole_tab(new_screen_size)
+        if self.size != new_screen_size {
+            self.size = new_screen_size;
+            for tab in self.tabs.values_mut() {
+                tab.resize_whole_tab(new_screen_size)
+                    .with_context(err_context)?;
+                tab.set_force_render();
+            }
+            self.log_and_report_session_state()
                 .with_context(err_context)?;
-            tab.set_force_render();
+            self.render(None).with_context(err_context)
+        } else {
+            Ok(())
         }
-        self.log_and_report_session_state()
-            .with_context(err_context)?;
-        self.render(None).with_context(err_context)
     }
 
     pub fn update_pixel_dimensions(&mut self, pixel_dimensions: PixelDimensions) {
@@ -1203,7 +1223,7 @@ impl Screen {
         let tab_name = tab_name.unwrap_or_else(|| String::new());
 
         let position = self.tabs.len();
-        let tab = Tab::new(
+        let mut tab = Tab::new(
             tab_index,
             position,
             tab_name,
@@ -1232,7 +1252,11 @@ impl Screen {
             self.debug,
             self.arrow_fonts,
             self.styled_underlines,
+            self.explicitly_disable_kitty_keyboard_protocol,
         );
+        for (client_id, mode_info) in &self.mode_info {
+            tab.change_mode_info(mode_info.clone(), *client_id);
+        }
         self.tabs.insert(tab_index, tab);
         Ok(())
     }
@@ -1765,12 +1789,6 @@ impl Screen {
             tab.mark_active_pane_for_rerender(client_id);
             tab.update_input_modes()?;
         }
-
-        if let Some(os_input) = &mut self.bus.os_input {
-            let _ =
-                os_input.send_to_client(client_id, ServerToClientMsg::SwitchToMode(mode_info.mode));
-        }
-
         Ok(())
     }
     pub fn change_mode_for_all_clients(&mut self, mode_info: ModeInfo) -> Result<()> {
@@ -1892,7 +1910,7 @@ impl Screen {
                 tab_index_and_plugin_pane_id = Some((*tab_index, plugin_pane_id));
                 if move_to_focused_tab && focused_tab_index != *tab_index {
                     plugin_pane_to_move_to_active_tab =
-                        tab.extract_pane(plugin_pane_id, Some(client_id));
+                        tab.extract_pane(plugin_pane_id, false, Some(client_id));
                 }
 
                 break;
@@ -1963,6 +1981,22 @@ impl Screen {
         };
         Ok(())
     }
+    pub fn rerun_command_pane_with_id(&mut self, terminal_pane_id: u32) {
+        let mut found = false;
+        for tab in self.tabs.values_mut() {
+            if tab.has_pane_with_pid(&PaneId::Terminal(terminal_pane_id)) {
+                tab.rerun_terminal_pane_with_id(terminal_pane_id);
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            log::error!(
+                "Failed to find terminal pane with id: {} to run",
+                terminal_pane_id
+            );
+        }
+    }
     pub fn break_pane(
         &mut self,
         default_shell: Option<TerminalAction>,
@@ -1979,7 +2013,7 @@ impl Screen {
                 .with_context(err_context)?;
             let pane_to_break_is_floating = active_tab.are_floating_panes_visible();
             let active_pane = active_tab
-                .close_pane(active_pane_id, false, Some(client_id))
+                .extract_pane(active_pane_id, false, Some(client_id))
                 .with_context(err_context)?;
             let active_pane_run_instruction = active_pane.invoked_with().clone();
             let tab_index = self.get_new_tab_index();
@@ -2040,7 +2074,7 @@ impl Screen {
                     .with_context(err_context)?;
                 let pane_to_break_is_floating = active_tab.are_floating_panes_visible();
                 let active_pane = active_tab
-                    .close_pane(active_pane_id, false, Some(client_id))
+                    .extract_pane(active_pane_id, false, Some(client_id))
                     .with_context(err_context)?;
                 (active_pane_id, active_pane, pane_to_break_is_floating)
             };
@@ -2142,6 +2176,36 @@ impl Screen {
             ClientTabIndexOrPaneId::TabIndex(_tab_index) => {
                 log::error!("Cannot replace pane with tab index");
             },
+        }
+        Ok(())
+    }
+    pub fn reconfigure_mode_info(
+        &mut self,
+        new_keybinds: Option<Keybinds>,
+        new_default_mode: Option<InputMode>,
+        client_id: ClientId,
+    ) -> Result<()> {
+        if self.connected_clients_contains(&client_id) {
+            let should_update_mode_info = new_keybinds.is_some() || new_default_mode.is_some();
+            let mode_info = self
+                .mode_info
+                .entry(client_id)
+                .or_insert_with(|| self.default_mode_info.clone());
+            if let Some(new_keybinds) = new_keybinds {
+                mode_info.update_keybinds(new_keybinds);
+            }
+            if let Some(new_default_mode) = new_default_mode {
+                mode_info.update_default_mode(new_default_mode);
+            }
+            if should_update_mode_info {
+                for tab in self.tabs.values_mut() {
+                    tab.change_mode_info(mode_info.clone(), client_id);
+                    tab.mark_active_pane_for_rerender(client_id);
+                    tab.update_input_modes()?;
+                }
+            }
+        } else {
+            log::error!("Could not find client_id {client_id} to rebind keys");
         }
         Ok(())
     }
@@ -2286,6 +2350,9 @@ impl Screen {
         }
         found_plugin
     }
+    fn connected_clients_contains(&self, client_id: &ClientId) -> bool {
+        self.connected_clients.borrow().contains(client_id)
+    }
 }
 
 // The box is here in order to make the
@@ -2295,10 +2362,11 @@ pub(crate) fn screen_thread_main(
     bus: Bus<ScreenInstruction>,
     max_panes: Option<usize>,
     client_attributes: ClientAttributes,
-    config_options: Box<Options>,
+    config: Config,
     debug: bool,
     default_layout: Box<Layout>,
 ) -> Result<()> {
+    let config_options = config.options;
     let arrow_fonts = !config_options.simplified_ui.unwrap_or_default();
     let draw_pane_frames = config_options.pane_frames.unwrap_or(true);
     let auto_layout = config_options.auto_layout.unwrap_or(true);
@@ -2317,6 +2385,13 @@ pub(crate) fn screen_thread_main(
         config_options.copy_on_select.unwrap_or(true),
     );
     let styled_underlines = config_options.styled_underlines.unwrap_or(true);
+    let explicitly_disable_kitty_keyboard_protocol = config_options
+        .support_kitty_keyboard_protocol
+        .map(|e| !e) // this is due to the config options wording, if
+        // "support_kitty_keyboard_protocol" is true,
+        // explicitly_disable_kitty_keyboard_protocol is false and vice versa
+        .unwrap_or(false); // by default, we try to support this if the terminal supports it and
+                           // the program running inside a pane requests it
 
     let thread_senders = bus.senders.clone();
     let mut screen = Screen::new(
@@ -2330,6 +2405,8 @@ pub(crate) fn screen_thread_main(
                 //  ¯\_(ツ)_/¯
                 arrow_fonts: !arrow_fonts,
             },
+            &config.keybinds,
+            config_options.default_mode,
         ),
         draw_pane_frames,
         auto_layout,
@@ -2345,6 +2422,7 @@ pub(crate) fn screen_thread_main(
         styled_underlines,
         arrow_fonts,
         layout_dir,
+        explicitly_disable_kitty_keyboard_protocol,
     );
 
     let mut pending_tab_ids: HashSet<usize> = HashSet::new();
@@ -2400,6 +2478,7 @@ pub(crate) fn screen_thread_main(
                 hold_for_command,
                 invoked_with,
                 floating_pane_coordinates,
+                start_suppressed,
                 client_or_tab_index,
             ) => {
                 match client_or_tab_index {
@@ -2410,6 +2489,7 @@ pub(crate) fn screen_thread_main(
                                should_float,
                                invoked_with,
                                floating_pane_coordinates,
+                               start_suppressed,
                                Some(client_id)
                            )
                         }, ?);
@@ -2435,6 +2515,7 @@ pub(crate) fn screen_thread_main(
                                 should_float,
                                 invoked_with,
                                 floating_pane_coordinates,
+                                start_suppressed,
                                 None,
                             )?;
                             if let Some(hold_for_command) = hold_for_command {
@@ -2536,15 +2617,20 @@ pub(crate) fn screen_thread_main(
                 screen.log_and_report_session_state()?;
                 screen.render(None)?;
             },
-            ScreenInstruction::WriteCharacter(bytes, client_id) => {
+            ScreenInstruction::WriteCharacter(
+                key_with_modifier,
+                raw_bytes,
+                is_kitty_keyboard_protocol,
+                client_id,
+            ) => {
                 let mut state_changed = false;
                 active_tab_and_connected_client_id!(
                     screen,
                     client_id,
                     |tab: &mut Tab, client_id: ClientId| {
                         let write_result = match tab.is_sync_panes_active() {
-                            true => tab.write_to_terminals_on_current_tab(bytes, client_id),
-                            false => tab.write_to_active_terminal(bytes, client_id),
+                            true => tab.write_to_terminals_on_current_tab(&key_with_modifier, raw_bytes, is_kitty_keyboard_protocol, client_id),
+                            false => tab.write_to_active_terminal(&key_with_modifier, raw_bytes, is_kitty_keyboard_protocol, client_id),
                         };
                         if let Ok(true) = write_result {
                             state_changed = true;
@@ -2938,6 +3024,7 @@ pub(crate) fn screen_thread_main(
                         }
                     },
                 }
+
                 screen.unblock_input()?;
                 screen.log_and_report_session_state()?;
             },
@@ -3571,6 +3658,7 @@ pub(crate) fn screen_thread_main(
                 plugin_id,
                 pane_id_to_replace,
                 cwd,
+                start_suppressed,
                 client_id,
             ) => {
                 let pane_title = pane_title.unwrap_or_else(|| {
@@ -3615,6 +3703,7 @@ pub(crate) fn screen_thread_main(
                             should_float,
                             Some(run_plugin),
                             None,
+                            start_suppressed,
                             Some(client_id),
                         )
                     }, ?);
@@ -3627,6 +3716,7 @@ pub(crate) fn screen_thread_main(
                         should_float,
                         Some(run_plugin),
                         None,
+                        start_suppressed,
                         None,
                     )?;
                 } else {
@@ -3987,6 +4077,18 @@ pub(crate) fn screen_thread_main(
                     set_session_name(name);
                 }
                 screen.unblock_input()?;
+            },
+            ScreenInstruction::Reconfigure {
+                client_id,
+                keybinds,
+                default_mode,
+            } => {
+                screen
+                    .reconfigure_mode_info(keybinds, default_mode, client_id)
+                    .non_fatal();
+            },
+            ScreenInstruction::RerunCommandPane(terminal_pane_id) => {
+                screen.rerun_command_pane_with_id(terminal_pane_id)
             },
         }
     }

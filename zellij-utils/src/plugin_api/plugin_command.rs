@@ -6,14 +6,14 @@ pub use super::generated_api::api::{
         plugin_command::Payload, CliPipeOutputPayload, CommandName, ContextItem, EnvVariable,
         ExecCmdPayload, FixedOrPercent as ProtobufFixedOrPercent,
         FixedOrPercentValue as ProtobufFixedOrPercentValue,
-        FloatingPaneCoordinates as ProtobufFloatingPaneCoordinates, HttpVerb as ProtobufHttpVerb,
-        IdAndNewName, KillSessionsPayload, MessageToPluginPayload, MovePayload,
-        NewPluginArgs as ProtobufNewPluginArgs, NewTabsWithLayoutInfoPayload,
+        FloatingPaneCoordinates as ProtobufFloatingPaneCoordinates, HidePaneWithIdPayload,
+        HttpVerb as ProtobufHttpVerb, IdAndNewName, KillSessionsPayload, MessageToPluginPayload,
+        MovePayload, NewPluginArgs as ProtobufNewPluginArgs, NewTabsWithLayoutInfoPayload,
         OpenCommandPanePayload, OpenFilePayload, PaneId as ProtobufPaneId,
         PaneType as ProtobufPaneType, PluginCommand as ProtobufPluginCommand, PluginMessagePayload,
-        RequestPluginPermissionPayload, ResizePayload, RunCommandPayload, SetTimeoutPayload,
-        SubscribePayload, SwitchSessionPayload, SwitchTabToPayload, UnsubscribePayload,
-        WebRequestPayload,
+        ReconfigurePayload, RequestPluginPermissionPayload, RerunCommandPanePayload, ResizePayload,
+        RunCommandPayload, SetTimeoutPayload, ShowPaneWithIdPayload, SubscribePayload,
+        SwitchSessionPayload, SwitchTabToPayload, UnsubscribePayload, WebRequestPayload,
     },
     plugin_permission::PermissionType as ProtobufPermissionType,
     resize::ResizeAction as ProtobufResizeAction,
@@ -227,7 +227,14 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
             Some(CommandName::OpenFile) => match protobuf_plugin_command.payload {
                 Some(Payload::OpenFilePayload(file_to_open_payload)) => {
                     match file_to_open_payload.file_to_open {
-                        Some(file_to_open) => Ok(PluginCommand::OpenFile(file_to_open.try_into()?)),
+                        Some(file_to_open) => {
+                            let context: BTreeMap<String, String> = file_to_open_payload
+                                .context
+                                .into_iter()
+                                .map(|e| (e.name, e.value))
+                                .collect();
+                            Ok(PluginCommand::OpenFile(file_to_open.try_into()?, context))
+                        },
                         None => Err("Malformed open file payload"),
                     }
                 },
@@ -238,10 +245,16 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                     let floating_pane_coordinates = file_to_open_payload
                         .floating_pane_coordinates
                         .map(|f| f.into());
+                    let context: BTreeMap<String, String> = file_to_open_payload
+                        .context
+                        .into_iter()
+                        .map(|e| (e.name, e.value))
+                        .collect();
                     match file_to_open_payload.file_to_open {
                         Some(file_to_open) => Ok(PluginCommand::OpenFileFloating(
                             file_to_open.try_into()?,
                             floating_pane_coordinates,
+                            context,
                         )),
                         None => Err("Malformed open file payload"),
                     }
@@ -278,7 +291,15 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 Some(Payload::OpenCommandPanePayload(command_to_run_payload)) => {
                     match command_to_run_payload.command_to_run {
                         Some(command_to_run) => {
-                            Ok(PluginCommand::OpenCommandPane(command_to_run.try_into()?))
+                            let context: BTreeMap<String, String> = command_to_run_payload
+                                .context
+                                .into_iter()
+                                .map(|e| (e.name, e.value))
+                                .collect();
+                            Ok(PluginCommand::OpenCommandPane(
+                                command_to_run.try_into()?,
+                                context,
+                            ))
                         },
                         None => Err("Malformed open open command pane payload"),
                     }
@@ -291,10 +312,18 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                         .floating_pane_coordinates
                         .map(|f| f.into());
                     match command_to_run_payload.command_to_run {
-                        Some(command_to_run) => Ok(PluginCommand::OpenCommandPaneFloating(
-                            command_to_run.try_into()?,
-                            floating_pane_coordinates,
-                        )),
+                        Some(command_to_run) => {
+                            let context: BTreeMap<String, String> = command_to_run_payload
+                                .context
+                                .into_iter()
+                                .map(|e| (e.name, e.value))
+                                .collect();
+                            Ok(PluginCommand::OpenCommandPaneFloating(
+                                command_to_run.try_into()?,
+                                floating_pane_coordinates,
+                                context,
+                            ))
+                        },
                         None => Err("Malformed open command pane floating payload"),
                     }
                 },
@@ -709,7 +738,15 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 Some(Payload::OpenFileInPlacePayload(file_to_open_payload)) => {
                     match file_to_open_payload.file_to_open {
                         Some(file_to_open) => {
-                            Ok(PluginCommand::OpenFileInPlace(file_to_open.try_into()?))
+                            let context: BTreeMap<String, String> = file_to_open_payload
+                                .context
+                                .into_iter()
+                                .map(|e| (e.name, e.value))
+                                .collect();
+                            Ok(PluginCommand::OpenFileInPlace(
+                                file_to_open.try_into()?,
+                                context,
+                            ))
                         },
                         None => Err("Malformed open file in place payload"),
                     }
@@ -719,9 +756,17 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
             Some(CommandName::OpenCommandInPlace) => match protobuf_plugin_command.payload {
                 Some(Payload::OpenCommandPaneInPlacePayload(command_to_run_payload)) => {
                     match command_to_run_payload.command_to_run {
-                        Some(command_to_run) => Ok(PluginCommand::OpenCommandPaneInPlace(
-                            command_to_run.try_into()?,
-                        )),
+                        Some(command_to_run) => {
+                            let context: BTreeMap<String, String> = command_to_run_payload
+                                .context
+                                .into_iter()
+                                .map(|e| (e.name, e.value))
+                                .collect();
+                            Ok(PluginCommand::OpenCommandPaneInPlace(
+                                command_to_run.try_into()?,
+                                context,
+                            ))
+                        },
                         None => Err("Malformed open command pane in-place payload"),
                     }
                 },
@@ -888,6 +933,64 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 },
                 _ => Err("Mismatched payload for NewTabsWithLayoutInfo"),
             },
+            Some(CommandName::Reconfigure) => match protobuf_plugin_command.payload {
+                Some(Payload::ReconfigurePayload(reconfigure_payload)) => {
+                    Ok(PluginCommand::Reconfigure(
+                        reconfigure_payload.config,
+                        reconfigure_payload.write_to_disk,
+                    ))
+                },
+                _ => Err("Mismatched payload for Reconfigure"),
+            },
+            Some(CommandName::HidePaneWithId) => match protobuf_plugin_command.payload {
+                Some(Payload::HidePaneWithIdPayload(hide_pane_with_id_payload)) => {
+                    let pane_id = hide_pane_with_id_payload
+                        .pane_id
+                        .and_then(|p_id| PaneId::try_from(p_id).ok())
+                        .ok_or("Failed to parse HidePaneWithId command")?;
+                    Ok(PluginCommand::HidePaneWithId(pane_id))
+                },
+                _ => Err("Mismatched payload for HidePaneWithId"),
+            },
+            Some(CommandName::ShowPaneWithId) => match protobuf_plugin_command.payload {
+                Some(Payload::ShowPaneWithIdPayload(show_pane_with_id_payload)) => {
+                    let pane_id = show_pane_with_id_payload
+                        .pane_id
+                        .and_then(|p_id| PaneId::try_from(p_id).ok())
+                        .ok_or("Failed to parse ShowPaneWithId command")?;
+                    let should_float_if_hidden = show_pane_with_id_payload.should_float_if_hidden;
+                    Ok(PluginCommand::ShowPaneWithId(
+                        pane_id,
+                        should_float_if_hidden,
+                    ))
+                },
+                _ => Err("Mismatched payload for ShowPaneWithId"),
+            },
+            Some(CommandName::OpenCommandPaneBackground) => match protobuf_plugin_command.payload {
+                Some(Payload::OpenCommandPaneBackgroundPayload(command_to_run_payload)) => {
+                    match command_to_run_payload.command_to_run {
+                        Some(command_to_run) => {
+                            let context: BTreeMap<String, String> = command_to_run_payload
+                                .context
+                                .into_iter()
+                                .map(|e| (e.name, e.value))
+                                .collect();
+                            Ok(PluginCommand::OpenCommandPaneBackground(
+                                command_to_run.try_into()?,
+                                context,
+                            ))
+                        },
+                        None => Err("Malformed open command pane background payload"),
+                    }
+                },
+                _ => Err("Mismatched payload for OpenCommandPaneBackground"),
+            },
+            Some(CommandName::RerunCommandPane) => match protobuf_plugin_command.payload {
+                Some(Payload::RerunCommandPanePayload(rerun_command_pane_payload)) => Ok(
+                    PluginCommand::RerunCommandPane(rerun_command_pane_payload.terminal_pane_id),
+                ),
+                _ => Err("Mismatched payload for RerunCommandPane"),
+            },
             None => Err("Unrecognized plugin command"),
         }
     }
@@ -927,19 +1030,27 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 name: CommandName::GetZellijVersion as i32,
                 payload: None,
             }),
-            PluginCommand::OpenFile(file_to_open) => Ok(ProtobufPluginCommand {
+            PluginCommand::OpenFile(file_to_open, context) => Ok(ProtobufPluginCommand {
                 name: CommandName::OpenFile as i32,
                 payload: Some(Payload::OpenFilePayload(OpenFilePayload {
                     file_to_open: Some(file_to_open.try_into()?),
                     floating_pane_coordinates: None,
+                    context: context
+                        .into_iter()
+                        .map(|(name, value)| ContextItem { name, value })
+                        .collect(),
                 })),
             }),
-            PluginCommand::OpenFileFloating(file_to_open, floating_pane_coordinates) => {
+            PluginCommand::OpenFileFloating(file_to_open, floating_pane_coordinates, context) => {
                 Ok(ProtobufPluginCommand {
                     name: CommandName::OpenFileFloating as i32,
                     payload: Some(Payload::OpenFileFloatingPayload(OpenFilePayload {
                         file_to_open: Some(file_to_open.try_into()?),
                         floating_pane_coordinates: floating_pane_coordinates.map(|f| f.into()),
+                        context: context
+                            .into_iter()
+                            .map(|(name, value)| ContextItem { name, value })
+                            .collect(),
                     })),
                 })
             },
@@ -948,6 +1059,7 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 payload: Some(Payload::OpenTerminalPayload(OpenFilePayload {
                     file_to_open: Some(cwd.try_into()?),
                     floating_pane_coordinates: None,
+                    context: vec![], // will be added in the future
                 })),
             }),
             PluginCommand::OpenTerminalFloating(cwd, floating_pane_coordinates) => {
@@ -956,23 +1068,40 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                     payload: Some(Payload::OpenTerminalFloatingPayload(OpenFilePayload {
                         file_to_open: Some(cwd.try_into()?),
                         floating_pane_coordinates: floating_pane_coordinates.map(|f| f.into()),
+                        context: vec![], // will be added in the future
                     })),
                 })
             },
-            PluginCommand::OpenCommandPane(command_to_run) => Ok(ProtobufPluginCommand {
-                name: CommandName::OpenCommandPane as i32,
-                payload: Some(Payload::OpenCommandPanePayload(OpenCommandPanePayload {
-                    command_to_run: Some(command_to_run.try_into()?),
-                    floating_pane_coordinates: None,
-                })),
-            }),
-            PluginCommand::OpenCommandPaneFloating(command_to_run, floating_pane_coordinates) => {
+            PluginCommand::OpenCommandPane(command_to_run, context) => {
+                let context: Vec<_> = context
+                    .into_iter()
+                    .map(|(name, value)| ContextItem { name, value })
+                    .collect();
+                Ok(ProtobufPluginCommand {
+                    name: CommandName::OpenCommandPane as i32,
+                    payload: Some(Payload::OpenCommandPanePayload(OpenCommandPanePayload {
+                        command_to_run: Some(command_to_run.try_into()?),
+                        floating_pane_coordinates: None,
+                        context,
+                    })),
+                })
+            },
+            PluginCommand::OpenCommandPaneFloating(
+                command_to_run,
+                floating_pane_coordinates,
+                context,
+            ) => {
+                let context: Vec<_> = context
+                    .into_iter()
+                    .map(|(name, value)| ContextItem { name, value })
+                    .collect();
                 Ok(ProtobufPluginCommand {
                     name: CommandName::OpenCommandPaneFloating as i32,
                     payload: Some(Payload::OpenCommandPaneFloatingPayload(
                         OpenCommandPanePayload {
                             command_to_run: Some(command_to_run.try_into()?),
                             floating_pane_coordinates: floating_pane_coordinates.map(|f| f.into()),
+                            context,
                         },
                     )),
                 })
@@ -1262,24 +1391,36 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 payload: Some(Payload::OpenTerminalInPlacePayload(OpenFilePayload {
                     file_to_open: Some(cwd.try_into()?),
                     floating_pane_coordinates: None,
+                    context: vec![], // will be added in the future
                 })),
             }),
-            PluginCommand::OpenFileInPlace(file_to_open) => Ok(ProtobufPluginCommand {
+            PluginCommand::OpenFileInPlace(file_to_open, context) => Ok(ProtobufPluginCommand {
                 name: CommandName::OpenFileInPlace as i32,
                 payload: Some(Payload::OpenFileInPlacePayload(OpenFilePayload {
                     file_to_open: Some(file_to_open.try_into()?),
                     floating_pane_coordinates: None,
+                    context: context
+                        .into_iter()
+                        .map(|(name, value)| ContextItem { name, value })
+                        .collect(),
                 })),
             }),
-            PluginCommand::OpenCommandPaneInPlace(command_to_run) => Ok(ProtobufPluginCommand {
-                name: CommandName::OpenCommandInPlace as i32,
-                payload: Some(Payload::OpenCommandPaneInPlacePayload(
-                    OpenCommandPanePayload {
-                        command_to_run: Some(command_to_run.try_into()?),
-                        floating_pane_coordinates: None,
-                    },
-                )),
-            }),
+            PluginCommand::OpenCommandPaneInPlace(command_to_run, context) => {
+                let context: Vec<_> = context
+                    .into_iter()
+                    .map(|(name, value)| ContextItem { name, value })
+                    .collect();
+                Ok(ProtobufPluginCommand {
+                    name: CommandName::OpenCommandInPlace as i32,
+                    payload: Some(Payload::OpenCommandPaneInPlacePayload(
+                        OpenCommandPanePayload {
+                            command_to_run: Some(command_to_run.try_into()?),
+                            floating_pane_coordinates: None,
+                            context,
+                        },
+                    )),
+                })
+            },
             PluginCommand::RunCommand(command_line, env_variables, cwd, context) => {
                 let env_variables: Vec<_> = env_variables
                     .into_iter()
@@ -1420,6 +1561,50 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                     )),
                 })
             },
+            PluginCommand::Reconfigure(config, write_to_disk) => Ok(ProtobufPluginCommand {
+                name: CommandName::Reconfigure as i32,
+                payload: Some(Payload::ReconfigurePayload(ReconfigurePayload {
+                    config,
+                    write_to_disk,
+                })),
+            }),
+            PluginCommand::HidePaneWithId(pane_id_to_hide) => Ok(ProtobufPluginCommand {
+                name: CommandName::HidePaneWithId as i32,
+                payload: Some(Payload::HidePaneWithIdPayload(HidePaneWithIdPayload {
+                    pane_id: ProtobufPaneId::try_from(pane_id_to_hide).ok(),
+                })),
+            }),
+            PluginCommand::ShowPaneWithId(pane_id_to_show, should_float_if_hidden) => {
+                Ok(ProtobufPluginCommand {
+                    name: CommandName::ShowPaneWithId as i32,
+                    payload: Some(Payload::ShowPaneWithIdPayload(ShowPaneWithIdPayload {
+                        pane_id: ProtobufPaneId::try_from(pane_id_to_show).ok(),
+                        should_float_if_hidden,
+                    })),
+                })
+            },
+            PluginCommand::OpenCommandPaneBackground(command_to_run, context) => {
+                let context: Vec<_> = context
+                    .into_iter()
+                    .map(|(name, value)| ContextItem { name, value })
+                    .collect();
+                Ok(ProtobufPluginCommand {
+                    name: CommandName::OpenCommandPaneBackground as i32,
+                    payload: Some(Payload::OpenCommandPaneBackgroundPayload(
+                        OpenCommandPanePayload {
+                            command_to_run: Some(command_to_run.try_into()?),
+                            floating_pane_coordinates: None,
+                            context,
+                        },
+                    )),
+                })
+            },
+            PluginCommand::RerunCommandPane(terminal_pane_id) => Ok(ProtobufPluginCommand {
+                name: CommandName::RerunCommandPane as i32,
+                payload: Some(Payload::RerunCommandPanePayload(RerunCommandPanePayload {
+                    terminal_pane_id,
+                })),
+            }),
         }
     }
 }

@@ -84,7 +84,7 @@ fn start_zellij(channel: &mut ssh2::Channel) {
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn start_zellij_mirrored_session(channel: &mut ssh2::Channel) {
@@ -99,7 +99,7 @@ fn start_zellij_mirrored_session(channel: &mut ssh2::Channel) {
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn start_zellij_mirrored_session_with_layout(channel: &mut ssh2::Channel, layout_file_name: &str) {
@@ -118,7 +118,7 @@ fn start_zellij_mirrored_session_with_layout(channel: &mut ssh2::Channel, layout
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn start_zellij_mirrored_session_with_layout_and_viewport_serialization(
@@ -140,7 +140,7 @@ fn start_zellij_mirrored_session_with_layout_and_viewport_serialization(
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn start_zellij_in_session(channel: &mut ssh2::Channel, session_name: &str, mirrored: bool) {
@@ -159,7 +159,7 @@ fn start_zellij_in_session(channel: &mut ssh2::Channel, session_name: &str, mirr
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn attach_to_existing_session(channel: &mut ssh2::Channel, session_name: &str) {
@@ -173,7 +173,7 @@ fn attach_to_existing_session(channel: &mut ssh2::Channel, session_name: &str) {
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn start_zellij_without_frames(channel: &mut ssh2::Channel) {
@@ -188,7 +188,7 @@ fn start_zellij_without_frames(channel: &mut ssh2::Channel) {
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn start_zellij_with_config(channel: &mut ssh2::Channel, config_path: &str) {
@@ -207,7 +207,7 @@ fn start_zellij_with_config(channel: &mut ssh2::Channel, config_path: &str) {
         )
         .unwrap();
     channel.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
+    std::thread::sleep(std::time::Duration::from_secs(3)); // wait until Zellij stops parsing startup ANSI codes from the terminal STDIN
 }
 
 fn read_from_channel(
@@ -237,6 +237,7 @@ fn read_from_channel(
                 let debug = false;
                 let arrow_fonts = true;
                 let styled_underlines = true;
+                let explicitly_disable_kitty_keyboard_protocol = false;
                 let mut terminal_output = TerminalPane::new(
                     0,
                     pane_geom,
@@ -253,13 +254,14 @@ fn read_from_channel(
                     debug,
                     arrow_fonts,
                     styled_underlines,
+                    explicitly_disable_kitty_keyboard_protocol,
                 ); // 0 is the pane index
                 loop {
                     if !should_keep_running.load(Ordering::SeqCst) {
                         break;
                     }
                     if should_sleep {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        std::thread::sleep(std::time::Duration::from_millis(100));
                         should_sleep = false;
                     }
                     let mut buf = [0u8; 1280000];
@@ -348,10 +350,6 @@ impl std::fmt::Debug for RemoteTerminal {
 impl RemoteTerminal {
     pub fn cursor_position_is(&self, x: usize, y: usize) -> bool {
         x == self.cursor_x && y == self.cursor_y
-    }
-    pub fn tip_appears(&self) -> bool {
-        let snapshot = self.last_snapshot.lock().unwrap();
-        snapshot.contains("Tip:") || snapshot.contains("QuickNav:")
     }
     pub fn status_bar_appears(&self) -> bool {
         self.last_snapshot.lock().unwrap().contains("Ctrl +")

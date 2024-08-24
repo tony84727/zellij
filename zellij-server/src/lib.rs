@@ -55,6 +55,7 @@ use zellij_utils::{
         plugins::PluginAliases,
     },
     ipc::{ClientAttributes, ExitReason, ServerToClientMsg},
+    shared::default_palette,
 };
 
 pub type ClientId = u16;
@@ -157,24 +158,29 @@ impl ErrorInstruction for ServerInstruction {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionConfiguration {
     runtime_config: HashMap<ClientId, Config>, // if present, overrides the saved_config
-    saved_config: HashMap<ClientId, Config>,   // config guaranteed to have been saved to disk
+    saved_config: HashMap<ClientId, Config>,   // the config as it is on disk (not guaranteed),
+                                               // when changed, this resets the runtime config to
+                                               // be identical to it and override any previous
+                                               // changes
 }
 
 impl SessionConfiguration {
-    pub fn new_saved_config(&mut self, client_id: ClientId, mut new_saved_config: Config) {
+    pub fn new_saved_config(
+        &mut self,
+        client_id: ClientId,
+        new_saved_config: Config,
+    ) -> Vec<(ClientId, Config)> {
         self.saved_config
             .insert(client_id, new_saved_config.clone());
-        if let Some(runtime_config) = self.runtime_config.get_mut(&client_id) {
-            match new_saved_config.merge(runtime_config.clone()) {
-                Ok(_) => {
-                    *runtime_config = new_saved_config;
-                },
-                Err(e) => {
-                    log::error!("Failed to update runtime config: {}", e);
-                },
+
+        let mut config_changes = vec![];
+        for (client_id, current_runtime_config) in self.runtime_config.iter_mut() {
+            if *current_runtime_config != new_saved_config {
+                *current_runtime_config = new_saved_config.clone();
+                config_changes.push((*client_id, new_saved_config.clone()))
             }
         }
-        // TODO: handle change by propagating to all the relevant places
+        config_changes
     }
     pub fn set_client_saved_configuration(&mut self, client_id: ClientId, client_config: Config) {
         self.saved_config.insert(client_id, client_config);
@@ -253,6 +259,53 @@ impl SessionMetaData {
         let all_clients: Vec<ClientId> = self.current_input_modes.keys().copied().collect();
         for client_id in all_clients {
             self.current_input_modes.insert(client_id, input_mode);
+        }
+    }
+    pub fn propagate_configuration_changes(&mut self, config_changes: Vec<(ClientId, Config)>) {
+        for (client_id, new_config) in config_changes {
+            self.default_shell = new_config.options.default_shell.as_ref().map(|shell| {
+                TerminalAction::RunCommand(RunCommand {
+                    command: shell.clone(),
+                    cwd: new_config.options.default_cwd.clone(),
+                    ..Default::default()
+                })
+            });
+            self.senders
+                .send_to_screen(ScreenInstruction::Reconfigure {
+                    client_id,
+                    keybinds: new_config.keybinds.clone(),
+                    default_mode: new_config
+                        .options
+                        .default_mode
+                        .unwrap_or_else(Default::default),
+                    theme: new_config
+                        .theme_config(new_config.options.theme.as_ref())
+                        .unwrap_or_else(|| default_palette()),
+                    simplified_ui: new_config.options.simplified_ui.unwrap_or(false),
+                    default_shell: new_config.options.default_shell,
+                    pane_frames: new_config.options.pane_frames.unwrap_or(true),
+                    copy_command: new_config.options.copy_command,
+                    copy_to_clipboard: new_config.options.copy_clipboard,
+                    copy_on_select: new_config.options.copy_on_select.unwrap_or(true),
+                    auto_layout: new_config.options.auto_layout.unwrap_or(true),
+                    rounded_corners: new_config.ui.pane_frames.rounded_corners,
+                    hide_session_name: new_config.ui.pane_frames.hide_session_name,
+                })
+                .unwrap();
+            self.senders
+                .send_to_plugin(PluginInstruction::Reconfigure {
+                    client_id,
+                    keybinds: Some(new_config.keybinds),
+                    default_mode: new_config.options.default_mode,
+                    default_shell: self.default_shell.clone(),
+                })
+                .unwrap();
+            self.senders
+                .send_to_pty(PtyInstruction::Reconfigure {
+                    client_id,
+                    default_editor: new_config.options.scrollback_editor,
+                })
+                .unwrap();
         }
     }
 }
@@ -1032,38 +1085,26 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
                         session_data
                             .write()
                             .unwrap()
-                            .as_ref()
+                            .as_mut()
                             .unwrap()
-                            .senders
-                            .send_to_screen(ScreenInstruction::Reconfigure {
-                                client_id,
-                                keybinds: Some(new_config.keybinds.clone()),
-                                default_mode: new_config.options.default_mode,
-                            })
-                            .unwrap();
-                        session_data
-                            .write()
-                            .unwrap()
-                            .as_ref()
-                            .unwrap()
-                            .senders
-                            .send_to_plugin(PluginInstruction::Reconfigure {
-                                client_id,
-                                keybinds: Some(new_config.keybinds),
-                                default_mode: new_config.options.default_mode,
-                            })
-                            .unwrap();
+                            .propagate_configuration_changes(vec![(client_id, new_config)]);
                     }
                 }
             },
             ServerInstruction::ConfigWrittenToDisk(client_id, new_config) => {
-                session_data
+                let changes = session_data
                     .write()
                     .unwrap()
                     .as_mut()
                     .unwrap()
                     .session_configuration
                     .new_saved_config(client_id, new_config);
+                session_data
+                    .write()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .propagate_configuration_changes(changes);
             },
             ServerInstruction::FailedToWriteConfigToDisk(client_id, file_path) => {
                 session_data

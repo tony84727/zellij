@@ -363,6 +363,27 @@ pub fn kdl_arguments_that_are_strings<'a>(
     Ok(args)
 }
 
+pub fn kdl_arguments_that_are_digits<'a>(
+    arguments: impl Iterator<Item = &'a KdlEntry>,
+) -> Result<Vec<i64>, ConfigError> {
+    let mut args: Vec<i64> = vec![];
+    for kdl_entry in arguments {
+        match kdl_entry.value().as_i64() {
+            Some(digit_value) => {
+                args.push(digit_value);
+            },
+            None => {
+                return Err(ConfigError::new_kdl_error(
+                    format!("Argument must be a digit"),
+                    kdl_entry.span().offset(),
+                    kdl_entry.span().len(),
+                ));
+            },
+        }
+    }
+    Ok(args)
+}
+
 pub fn kdl_child_string_value_for_entry<'a>(
     command_metadata: &'a KdlDocument,
     entry_name: &'a str,
@@ -1010,7 +1031,12 @@ impl Action {
                 in_place,
                 cwd,
                 pane_title,
+                plugin_id,
             } => {
+                if plugin_id.is_some() {
+                    log::warn!("Not serializing temporary keybinding MessagePluginId");
+                    return None;
+                }
                 let mut node = KdlNode::new("MessagePlugin");
                 let mut node_children = KdlDocument::new();
                 if let Some(plugin) = plugin {
@@ -1678,6 +1704,46 @@ impl TryFrom<(&KdlNode, &Options)> for Action {
                     in_place: None, // TODO: support this
                     cwd,
                     pane_title: title,
+                    plugin_id: None,
+                })
+            },
+            "MessagePluginId" => {
+                let arguments = action_arguments.iter().copied();
+                let mut args = kdl_arguments_that_are_digits(arguments)?;
+                let plugin_id = if args.is_empty() {
+                    None
+                } else {
+                    Some(args.remove(0) as u32)
+                };
+
+                let command_metadata = action_children.iter().next();
+                let launch_new = false;
+                let skip_cache = false;
+                let name = command_metadata
+                    .and_then(|c_m| kdl_child_string_value_for_entry(c_m, "name"))
+                    .map(|n| n.to_owned());
+                let payload = command_metadata
+                    .and_then(|c_m| kdl_child_string_value_for_entry(c_m, "payload"))
+                    .map(|p| p.to_owned());
+                let configuration = None;
+
+                let name = name
+                    // if no name is provided, we use a uuid to at least have some sort of identifier for this message
+                    .or_else(|| Some(Uuid::new_v4().to_string()));
+
+                Ok(Action::KeybindPipe {
+                    name,
+                    payload,
+                    args: None, // TODO: consider supporting this if there's a need
+                    plugin: None,
+                    configuration,
+                    launch_new,
+                    skip_cache,
+                    floating: None,
+                    in_place: None, // TODO: support this
+                    cwd: None,
+                    pane_title: None,
+                    plugin_id,
                 })
             },
             _ => Err(ConfigError::new_kdl_error(
@@ -2361,8 +2427,11 @@ impl Options {
     }
     fn layout_dir_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
         let comment_text = format!(
-            "{}\n{}\n{}",
-            " ", "// The folder in which Zellij will look for layouts", "// ",
+            "{}\n{}\n{}\n{}",
+            " ",
+            "// The folder in which Zellij will look for layouts",
+            "// (Requires restart)",
+            "// ",
         );
 
         let create_node = |node_value: &str| -> KdlNode {
@@ -2386,8 +2455,11 @@ impl Options {
     }
     fn theme_dir_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
         let comment_text = format!(
-            "{}\n{}\n{}",
-            " ", "// The folder in which Zellij will look for themes", "// ",
+            "{}\n{}\n{}\n{}",
+            " ",
+            "// The folder in which Zellij will look for themes",
+            "// (Requires restart)",
+            "// ",
         );
 
         let create_node = |node_value: &str| -> KdlNode {
@@ -2473,11 +2545,12 @@ impl Options {
     }
     fn mirror_session_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
         let comment_text = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}",
             " ",
             "// When attaching to an existing session with other users,",
             "// should the session be mirrored (true)",
             "// or should each user have their own cursor (false)",
+            "// (Requires restart)",
             "// Default: false",
             "// ",
         );
@@ -2503,10 +2576,11 @@ impl Options {
     }
     fn on_force_close_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
         let comment_text = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             " ",
             "// Choose what to do when zellij receives SIGTERM, SIGINT, SIGQUIT or SIGHUP",
             "// eg. when terminal window with an active zellij session is closed",
+            "// (Requires restart)",
             "// Options:",
             "//   - detach (Default)",
             "//   - quit",
@@ -2537,11 +2611,12 @@ impl Options {
     }
     fn scroll_buffer_size_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
         let comment_text = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             " ",
             "// Configure the scroll back buffer size",
             "// This is the number of lines zellij stores for each pane in the scroll back",
             "// buffer. Excess number of lines are discarded in a FIFO fashion.",
+            "// (Requires restart)",
             "// Valid values: positive integers",
             "// Default value: 10000",
             "// ",
@@ -2867,10 +2942,11 @@ impl Options {
     }
     fn styled_underlines_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
         let comment_text = format!(
-            "{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}",
             " ",
             "// Enable or disable the rendering of styled and colored underlines (undercurl).",
             "// May need to be disabled for certain unsupported terminals",
+            "// (Requires restart)",
             "// Default: true",
             "// ",
         );
@@ -2920,10 +2996,11 @@ impl Options {
         }
     }
     fn disable_session_metadata_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
-        let comment_text = format!("{}\n{}\n{}\n{}\n{}",
+        let comment_text = format!("{}\n{}\n{}\n{}\n{}\n{}",
             " ",
             "// Enable or disable writing of session metadata to disk (if disabled, other sessions might not know",
             "// metadata info on this session)",
+            "// (Requires restart)",
             "// Default: false",
             "// ",
         );
@@ -2948,9 +3025,10 @@ impl Options {
         }
     }
     fn support_kitty_keyboard_protocol_to_kdl(&self, add_comments: bool) -> Option<KdlNode> {
-        let comment_text = format!("{}\n{}\n{}\n{}",
+        let comment_text = format!("{}\n{}\n{}\n{}\n{}",
             " ",
             "// Enable or disable support for the enhanced Kitty Keyboard Protocol (the host terminal must also support it)",
+            "// (Requires restart)",
             "// Default: true (if the host terminal supports it)",
             "// ",
         );
@@ -3559,7 +3637,7 @@ impl Config {
             document.nodes_mut().push(themes);
         }
 
-        let plugins = self.plugins.to_kdl();
+        let plugins = self.plugins.to_kdl(add_comments);
         document.nodes_mut().push(plugins);
 
         if let Some(ui_config) = self.ui.to_kdl() {
@@ -3601,7 +3679,7 @@ impl PluginAliases {
         }
         Ok(PluginAliases { aliases })
     }
-    pub fn to_kdl(&self) -> KdlNode {
+    pub fn to_kdl(&self, add_comments: bool) -> KdlNode {
         let mut plugins = KdlNode::new("plugins");
         let mut plugins_children = KdlDocument::new();
         for (alias_name, plugin_alias) in self.aliases.iter() {
@@ -3639,6 +3717,14 @@ impl PluginAliases {
             plugins_children.nodes_mut().push(plugin_alias_node);
         }
         plugins.set_children(plugins_children);
+
+        if add_comments {
+            plugins.set_leading(format!(
+                "\n{}\n{}\n",
+                "// Plugin aliases - can be used to change the implementation of Zellij",
+                "// changing these requires a restart to take effect",
+            ));
+        }
         plugins
     }
 }
@@ -5081,7 +5167,7 @@ fn plugins_to_string() {
         }"##;
     let document: KdlDocument = fake_config.parse().unwrap();
     let deserialized = PluginAliases::from_kdl(document.get("plugins").unwrap()).unwrap();
-    let serialized = PluginAliases::to_kdl(&deserialized);
+    let serialized = PluginAliases::to_kdl(&deserialized, true);
     let deserialized_from_serialized = PluginAliases::from_kdl(
         serialized
             .to_string()
@@ -5109,7 +5195,7 @@ fn plugins_to_string_with_file_and_web() {
         }"##;
     let document: KdlDocument = fake_config.parse().unwrap();
     let deserialized = PluginAliases::from_kdl(document.get("plugins").unwrap()).unwrap();
-    let serialized = PluginAliases::to_kdl(&deserialized);
+    let serialized = PluginAliases::to_kdl(&deserialized, true);
     let deserialized_from_serialized = PluginAliases::from_kdl(
         serialized
             .to_string()

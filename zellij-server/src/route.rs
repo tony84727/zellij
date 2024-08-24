@@ -93,23 +93,6 @@ pub(crate) fn route_action(
         },
         Action::SwitchToMode(mode) => {
             let attrs = &client_attributes;
-            // TODO: use the palette from the client and remove it from the server os api
-            // this is left here as a stop gap measure until we shift some code around
-            // to allow for this
-            // TODO: Need access to `ClientAttributes` here
-            senders
-                .send_to_plugin(PluginInstruction::Update(vec![(
-                    None,
-                    Some(client_id),
-                    Event::ModeUpdate(get_mode_info(
-                        mode,
-                        attrs,
-                        capabilities,
-                        &client_keybinds,
-                        Some(default_mode),
-                    )),
-                )]))
-                .with_context(err_context)?;
             senders
                 .send_to_server(ServerInstruction::ChangeMode(client_id, mode))
                 .with_context(err_context)?;
@@ -938,12 +921,13 @@ pub(crate) fn route_action(
             cwd,
             pane_title,
             launch_new,
+            plugin_id,
             ..
         } => {
             if let Some(name) = name.take() {
                 let should_open_in_place = in_place.unwrap_or(false);
                 let pane_id_to_replace = if should_open_in_place { pane_id } else { None };
-                if launch_new {
+                if launch_new && plugin_id.is_none() {
                     // we do this to make sure the plugin is unique (has a unique configuration parameter)
                     configuration
                         .get_or_insert_with(BTreeMap::new)
@@ -962,6 +946,7 @@ pub(crate) fn route_action(
                         pane_title,
                         skip_cache,
                         cli_client_id: client_id,
+                        plugin_and_client_id: plugin_id.map(|plugin_id| (plugin_id, client_id)),
                     })
                     .with_context(err_context)?;
             } else {
